@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>互動式長方形畫布</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+      --primary: #4f46e5;
+      --panel: rgba(255, 255, 255, .96);
+      --border: #dbe3ee;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #f8fafc;
+      color: #172033;
+      touch-action: none;
+      user-select: none;
+    }
+    button, input { font: inherit; }
+    button {
+      border: 0;
+      cursor: pointer;
+      color: inherit;
+    }
+    button:focus-visible, input:focus-visible {
+      outline: 3px solid #a5b4fc;
+      outline-offset: 2px;
+    }
+    .header {
+      position: fixed;
+      inset: 0 0 auto;
+      z-index: 30;
+      padding: 14px 16px 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(10px);
+    }
+    h1 {
+      margin: 0 0 10px;
+      color: #3730a3;
+      text-align: center;
+      font-size: clamp(20px, 4vw, 26px);
+    }
+    .templates {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+    .template {
+      display: grid;
+      place-items: center;
+      border: 2px solid transparent;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      transition: transform .15s, filter .15s;
+    }
+    .template:hover { transform: translateY(-2px); filter: brightness(.96); }
+    .template[data-shape="wide"] { width: 92px; height: 46px; }
+    .template[data-shape="tall"] { width: 46px; height: 78px; }
+    .pink { background: #fbcfe8; }
+    .blue { background: #bfdbfe; }
+    #workspace {
+      position: fixed;
+      inset: var(--header-height, 130px) 0 0;
+      overflow: hidden;
+      background-image:
+        linear-gradient(#e8edf4 1px, transparent 1px),
+        linear-gradient(90deg, #e8edf4 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+    #emptyHint {
+      position: absolute;
+      inset: 35% 16px auto;
+      color: #94a3b8;
+      text-align: center;
+      pointer-events: none;
+    }
+    .rectangle {
+      position: absolute;
+      overflow: hidden;
+      min-width: 40px;
+      min-height: 40px;
+      border-radius: 12px;
+      box-shadow: 0 6px 16px rgba(15, 23, 42, .12);
+      cursor: grab;
+      touch-action: none;
+    }
+    .rectangle canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .rectangle.selected {
+      outline: 3px solid var(--primary);
+      box-shadow: 0 12px 26px rgba(15, 23, 42, .22);
+    }
+    .rectangle.drawing { cursor: crosshair; }
+    .handle {
+      position: fixed;
+      z-index: 60;
+      display: none;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: 3px solid #fff;
+      border-radius: 50%;
+      background: var(--primary);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .25);
+      touch-action: none;
+    }
+    .controls {
+      position: fixed;
+      z-index: 80;
+      left: 50%;
+      bottom: max(14px, env(safe-area-inset-bottom));
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      max-width: calc(100vw - 20px);
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      background: var(--panel);
+      box-shadow: 0 12px 28px rgba(15, 23, 42, .16);
+      transform: translateX(-50%);
+    }
+    .tool {
+      min-height: 42px;
+      padding: 8px 12px;
+      border-radius: 11px;
+      background: transparent;
+      white-space: nowrap;
+    }
+    .tool:hover { background: #eef2ff; }
+    .tool.active { color: #fff; background: var(--primary); }
+    .tool.danger { color: #dc2626; }
+    .color {
+      width: 38px;
+      height: 38px;
+      padding: 2px;
+      border: 1px solid var(--border);
+      border-radius: 50%;
+      background: #fff;
+      cursor: pointer;
+    }
+    @media (max-width: 640px) {
+      .header { padding-top: 10px; }
+      .template { font-size: 0; }
+      .template[data-shape="wide"] { width: 64px; height: 34px; }
+      .template[data-shape="tall"] { width: 34px; height: 58px; }
+      .controls { overflow-x: auto; justify-content: flex-start; }
+      .tool { padding-inline: 10px; }
+      .tool .label { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <header class="header" id="header">
+    <h1>互動式畫布工作坊</h1>
+    <div class="templates" aria-label="新增長方形">
+      <button class="template pink" data-color="pink" data-shape="wide" data-width="160" data-height="80" aria-label="新增橫向粉色長方形">橫向粉</button>
+      <button class="template blue" data-color="blue" data-shape="wide" data-width="160" data-height="80" aria-label="新增橫向藍色長方形">橫向藍</button>
+      <button class="template pink" data-color="pink" data-shape="tall" data-width="80" data-height="160" aria-label="新增縱向粉色長方形">縱向粉</button>
+      <button class="template blue" data-color="blue" data-shape="tall" data-width="80" data-height="160" aria-label="新增縱向藍色長方形">縱向藍</button>
+    </div>
+  </header>
+
+  <main id="workspace" aria-label="互動畫布">
+    <p id="emptyHint">點選上方色塊，開始建立你的畫布</p>
+  </main>
+
+  <nav class="controls" aria-label="畫布工具">
+    <input class="color" type="color" id="customColor" value="#1e293b" aria-label="畫筆顏色">
+    <button class="tool mode" id="moveBtn" data-mode="move" title="移動（V）">🖱️ <span class="label">移動</span></button>
+    <button class="tool mode" id="drawBtn" data-mode="draw" title="畫筆（B）">✏️ <span class="label">畫筆</span></button>
+    <button class="tool mode" id="resizeBtn" data-mode="resize" title="調整大小（R）">📐 <span class="label">調整</span></button>
+    <button class="tool" id="undoBtn" title="復原筆畫（Ctrl+Z）">↶ <span class="label">復原</span></button>
+    <button class="tool danger" id="deleteBtn" title="刪除選取物（Delete）">🗑️</button>
+    <button class="tool" id="clearBtn" title="清空畫布">🔄</button>
+  </nav>
+
+  <script>
+    (() => {
+      "use strict";
+
+      const workspace = document.querySelector("#workspace");
+      const header = document.querySelector("#header");
+      const emptyHint = document.querySelector("#emptyHint");
+      const colorInput = document.querySelector("#customColor");
+      const MIN_SIZE = 40;
+      const state = {
+        mode: "move",
+        selected: null,
+        action: null,
+        topZ: 0,
+        strokeHistory: new WeakMap()
+      };
+
+      const handles = ["tl", "tr", "bl", "br"].map(position => {
+        const handle = document.createElement("button");
+        handle.className = "handle";
+        handle.dataset.position = position;
+        handle.type = "button";
+        handle.setAttribute("aria-label", `調整${position}角`);
+        document.body.append(handle);
+        return handle;
+      });
+
+      const point = event => ({ x: event.clientX, y: event.clientY });
+      const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+      const rects = () => [...workspace.querySelectorAll(".rectangle")];
+
+      function syncLayout() {
+        document.documentElement.style.setProperty("--header-height", `${header.offsetHeight}px`);
+        positionHandles();
+      }
+
+      function setMode(mode) {
+        state.mode = mode;
+        document.querySelectorAll(".mode").forEach(button => {
+          button.classList.toggle("active", button.dataset.mode === mode);
+          button.setAttribute("aria-pressed", button.dataset.mode === mode);
+        });
+        rects().forEach(rect => rect.classList.toggle("drawing", mode === "draw"));
+        positionHandles();
+      }
+
+      function select(rect) {
+        state.selected?.classList.remove("selected");
+        state.selected = rect;
+        if (rect) {
+          rect.classList.add("selected");
+          rect.style.zIndex = ++state.topZ;
+        }
+        positionHandles();
+      }
+
+      function positionHandles() {
+        if (!state.selected?.isConnected || state.mode !== "resize") {
+          handles.forEach(handle => handle.style.display = "none");
+          return;
+        }
+        const box = state.selected.getBoundingClientRect();
+        const positions = {
+          tl: [box.left, box.top],
+          tr: [box.right, box.top],
+          bl: [box.left, box.bottom],
+          br: [box.right, box.bottom]
+        };
+        handles.forEach(handle => {
+          const [x, y] = positions[handle.dataset.position];
+          handle.style.display = "block";
+          handle.style.left = `${x - 9}px`;
+          handle.style.top = `${y - 9}px`;
+        });
+      }
+
+      function setupCanvas(canvas, cssWidth, cssHeight, source) {
+        const ratio = Math.max(1, window.devicePixelRatio || 1);
+        canvas.width = Math.round(cssWidth * ratio);
+        canvas.height = Math.round(cssHeight * ratio);
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        const context = canvas.getContext("2d");
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        if (source) context.drawImage(source, 0, 0, source.width, source.height, 0, 0, cssWidth, cssHeight);
+        return context;
+      }
+
+      function snapshot(canvas) {
+        const copy = document.createElement("canvas");
+        copy.width = canvas.width;
+        copy.height = canvas.height;
+        copy.getContext("2d").drawImage(canvas, 0, 0);
+        return copy;
+      }
+
+      function createRectangle(color, width, height) {
+        const rect = document.createElement("div");
+        rect.className = `rectangle ${color}`;
+        rect.style.width = `${width}px`;
+        rect.style.height = `${height}px`;
+
+        const count = rects().length;
+        const maxLeft = Math.max(0, workspace.clientWidth - width);
+        const maxTop = Math.max(0, workspace.clientHeight - height);
+        rect.style.left = `${clamp(36 + (count * 20) % 160, 0, maxLeft)}px`;
+        rect.style.top = `${clamp(36 + (count * 20) % 120, 0, maxTop)}px`;
+
+        const canvas = document.createElement("canvas");
+        setupCanvas(canvas, width, height);
+        rect.append(canvas);
+        workspace.append(rect);
+        state.strokeHistory.set(rect, []);
+        emptyHint.hidden = true;
+        select(rect);
+      }
+
+      function startAction(event) {
+        const handle = event.target.closest(".handle");
+        const rect = event.target.closest(".rectangle");
+
+        if (handle && state.selected) {
+          const box = state.selected.getBoundingClientRect();
+          state.action = {
+            type: "resize",
+            pointerId: event.pointerId,
+            start: point(event),
+            position: handle.dataset.position,
+            left: state.selected.offsetLeft,
+            top: state.selected.offsetTop,
+            width: box.width,
+            height: box.height,
+            image: snapshot(state.selected.querySelector("canvas"))
+          };
+          handle.setPointerCapture(event.pointerId);
+          event.preventDefault();
+          return;
+        }
+
+        if (!rect) {
+          if (event.target === workspace) select(null);
+          return;
+        }
+
+        select(rect);
+        const box = rect.getBoundingClientRect();
+        state.action = {
+          type: state.mode,
+          pointerId: event.pointerId,
+          start: point(event),
+          left: rect.offsetLeft,
+          top: rect.offsetTop,
+          lastX: event.clientX - box.left,
+          lastY: event.clientY - box.top
+        };
+        rect.setPointerCapture(event.pointerId);
+
+        if (state.mode === "draw") {
+          state.strokeHistory.get(rect).push(snapshot(rect.querySelector("canvas")));
+        }
+        event.preventDefault();
+      }
+
+      function moveAction(event) {
+        if (!state.action || event.pointerId !== state.action.pointerId || !state.selected) return;
+        const action = state.action;
+        const dx = event.clientX - action.start.x;
+        const dy = event.clientY - action.start.y;
+
+        if (action.type === "move") {
+          const maxLeft = Math.max(0, workspace.clientWidth - state.selected.offsetWidth);
+          const maxTop = Math.max(0, workspace.clientHeight - state.selected.offsetHeight);
+          state.selected.style.left = `${clamp(action.left + dx, 0, maxLeft)}px`;
+          state.selected.style.top = `${clamp(action.top + dy, 0, maxTop)}px`;
+        }
+
+        if (action.type === "draw") {
+          const box = state.selected.getBoundingClientRect();
+          const x = clamp(event.clientX - box.left, 0, box.width);
+          const y = clamp(event.clientY - box.top, 0, box.height);
+          const context = state.selected.querySelector("canvas").getContext("2d");
+          context.beginPath();
+          context.moveTo(action.lastX, action.lastY);
+          context.lineTo(x, y);
+          context.strokeStyle = colorInput.value;
+          context.lineWidth = 3;
+          context.stroke();
+          action.lastX = x;
+          action.lastY = y;
+        }
+
+        if (action.type === "resize") resizeSelected(action, dx, dy);
+        positionHandles();
+      }
+
+      function resizeSelected(action, dx, dy) {
+        const leftSide = action.position.includes("l");
+        const topSide = action.position.includes("t");
+        let width = Math.max(MIN_SIZE, action.width + (leftSide ? -dx : dx));
+        let height = Math.max(MIN_SIZE, action.height + (topSide ? -dy : dy));
+        let left = leftSide ? action.left + action.width - width : action.left;
+        let top = topSide ? action.top + action.height - height : action.top;
+
+        left = clamp(left, 0, workspace.clientWidth - MIN_SIZE);
+        top = clamp(top, 0, workspace.clientHeight - MIN_SIZE);
+        width = Math.min(width, workspace.clientWidth - left);
+        height = Math.min(height, workspace.clientHeight - top);
+
+        Object.assign(state.selected.style, {
+          left: `${left}px`,
+          top: `${top}px`,
+          width: `${width}px`,
+          height: `${height}px`
+        });
+        setupCanvas(state.selected.querySelector("canvas"), width, height, action.image);
+      }
+
+      function endAction(event) {
+        if (state.action?.pointerId === event.pointerId) state.action = null;
+      }
+
+      function undoStroke() {
+        if (!state.selected) return;
+        const history = state.strokeHistory.get(state.selected);
+        const previous = history?.pop();
+        if (!previous) return;
+        const canvas = state.selected.querySelector("canvas");
+        const context = canvas.getContext("2d");
+        context.save();
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(previous, 0, 0, canvas.width, canvas.height);
+        context.restore();
+      }
+
+      function deleteSelected() {
+        if (!state.selected) return;
+        state.selected.remove();
+        select(null);
+        emptyHint.hidden = rects().length > 0;
+      }
+
+      document.querySelectorAll(".template").forEach(button => {
+        button.addEventListener("click", () => createRectangle(
+          button.dataset.color,
+          Number(button.dataset.width),
+          Number(button.dataset.height)
+        ));
+      });
+      document.querySelectorAll(".mode").forEach(button => {
+        button.addEventListener("click", () => setMode(button.dataset.mode));
+      });
+      document.querySelector("#undoBtn").addEventListener("click", undoStroke);
+      document.querySelector("#deleteBtn").addEventListener("click", deleteSelected);
+      document.querySelector("#clearBtn").addEventListener("click", () => {
+        if (!rects().length || window.confirm("確定要清空整個畫布嗎？")) {
+          rects().forEach(rect => rect.remove());
+          select(null);
+          emptyHint.hidden = false;
+        }
+      });
+
+      window.addEventListener("pointerdown", startAction);
+      window.addEventListener("pointermove", moveAction);
+      window.addEventListener("pointerup", endAction);
+      window.addEventListener("pointercancel", endAction);
+      window.addEventListener("resize", syncLayout);
+      window.addEventListener("keydown", event => {
+        if (event.key === "Delete" || event.key === "Backspace") deleteSelected();
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+          event.preventDefault();
+          undoStroke();
+        }
+        if (!event.ctrlKey && !event.metaKey && !event.altKey) {
+          if (event.key.toLowerCase() === "v") setMode("move");
+          if (event.key.toLowerCase() === "b") setMode("draw");
+          if (event.key.toLowerCase() === "r") setMode("resize");
+        }
+      });
+
+      syncLayout();
+      setMode("move");
+    })();
+  </script>
+</body>
+</html>
